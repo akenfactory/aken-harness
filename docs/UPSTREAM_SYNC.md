@@ -7,9 +7,11 @@ copia local y, desde ahí, subirlos a `origin` (este fork).
 
 ## Opción rápida: script automatizado
 
-El script [`scripts/sync-upstream.ps1`](../scripts/sync-upstream.ps1) automatiza
-todos los pasos de este documento (configurar el remoto, fetch, merge/rebase y
-push):
+Hay dos scripts equivalentes que automatizan todos los pasos de este documento
+(configurar el remoto, fetch, merge/rebase y push): uno en PowerShell y otro
+en bash. Usa el que corresponda a tu terminal.
+
+### PowerShell — [`scripts/sync-upstream.ps1`](../scripts/sync-upstream.ps1)
 
 ```powershell
 # Ver cuántos commits nuevos hay, sin modificar nada
@@ -23,6 +25,22 @@ push):
 
 # Usar rebase en vez de merge
 .\scripts\sync-upstream.ps1 -Rebase -Push
+```
+
+### Bash (Git Bash, WSL, Linux, macOS) — [`scripts/sync-upstream.sh`](../scripts/sync-upstream.sh)
+
+```bash
+# Ver cuántos commits nuevos hay, sin modificar nada
+./scripts/sync-upstream.sh --dry-run
+
+# Sincronizar master con upstream/master (merge) y confirmar el push interactivamente
+./scripts/sync-upstream.sh
+
+# Igual, pero publica en origin sin preguntar
+./scripts/sync-upstream.sh --push
+
+# Usar rebase en vez de merge
+./scripts/sync-upstream.sh --rebase --push
 ```
 
 El resto de este documento explica los mismos pasos de forma manual, por si
