@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Sincroniza este fork con deepseek-ai/deepseek-harness (ver docs/UPSTREAM_SYNC.md).
 
