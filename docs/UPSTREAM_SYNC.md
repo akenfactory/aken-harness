@@ -5,6 +5,29 @@ Este repositorio (`akenfactory/aken-harness`) es un fork de
 Esta guía explica cómo traer los cambios del proyecto original (upstream) a tu
 copia local y, desde ahí, subirlos a `origin` (este fork).
 
+## Opción rápida: script automatizado
+
+El script [`scripts/sync-upstream.ps1`](../scripts/sync-upstream.ps1) automatiza
+todos los pasos de este documento (configurar el remoto, fetch, merge/rebase y
+push):
+
+```powershell
+# Ver cuántos commits nuevos hay, sin modificar nada
+.\scripts\sync-upstream.ps1 -DryRun
+
+# Sincronizar master con upstream/master (merge) y confirmar el push interactivamente
+.\scripts\sync-upstream.ps1
+
+# Igual, pero publica en origin sin preguntar
+.\scripts\sync-upstream.ps1 -Push
+
+# Usar rebase en vez de merge
+.\scripts\sync-upstream.ps1 -Rebase -Push
+```
+
+El resto de este documento explica los mismos pasos de forma manual, por si
+prefieres ejecutarlos uno a uno o necesitas resolver un caso particular.
+
 ## 1. Configuración inicial (ya realizada)
 
 Ya se agregó el remoto `upstream` apuntando al repo original, con el push
