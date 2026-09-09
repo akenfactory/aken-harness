@@ -1,0 +1,38 @@
+services:
+  dsh:
+    build: .
+    image: aken-harness-dsh:dev
+    container_name: aken-harness-dsh
+    working_dir: /workspace
+    env_file:
+      # Credenciales (ADMIN_EMAIL, ADMIN_PASSWORD, DEEPSEEK_API_KEY, ...).
+      # No se comitea: ver .env.example.
+      - .env
+    ports:
+      # Publicado hacia el proxy socat (ver docker/start-web.sh), no hacia
+      # dsh directamente: dsh web solo escucha 127.0.0.1 dentro del
+      # contenedor, así que esto es lo único alcanzable desde el host.
+      - "${DSH_WEB_PORT:-8080}:8080"
+    volumes:
+      # Código fuente: bind mount del repo. Se sigue editando desde el host
+      # (fuera del contenedor) y los cambios se ven al instante adentro.
+      - .:/workspace
+      # node_modules propio del contenedor: evita que un `pnpm install` hecho
+      # adentro pise los binarios nativos que ya tenés instalados en el host
+      # (Windows) con los que arma Linux dentro del contenedor.
+      - dsh_node_modules:/workspace/node_modules
+      # Datos de usuario (sesiones, settings, credenciales) que dsh guarda en
+      # ~/.dsh. Se monta el home real del host: podés ver/editar esos archivos
+      # desde afuera del contenedor con normalidad.
+      - ${DSH_DATA_HOME:-${USERPROFILE}/.dsh}:/root/.dsh
+    environment:
+      DSH_HOME: /root/.dsh
+      NODE_ENV: development
+      DSH_WEB_INTERNAL_PORT: "3080"
+      DSH_WEB_INTERNAL_PROXY_PORT: "8080"
+    command: bash /workspace/docker/start-web.sh
+    stdin_open: true
+    tty: true
+
+volumes:
+  dsh_node_modules:
