@@ -84,13 +84,13 @@ export interface ConnectionTrustRequest {
 /** HTTP status returned before dispatch, or undefined when the request may proceed. */
 export type ConnectionRequestRejection = 401 | 403 | undefined
 
-/** Root/index request facts used by the browser-token exchange. */
+/** Root/index request facts used by the admin-login authentication gate. */
 export interface ConnectionIndexRequest extends ConnectionTrustRequest {
   readonly method?: string | undefined
   readonly url?: string | undefined
 }
 
-/** Root/index response operations owned by the browser-token exchange. */
+/** Root/index response operations owned by the admin-login authentication gate. */
 export interface ConnectionIndexResponse {
   writeHead(status: number, headers?: Readonly<Record<string, string>>): unknown
   end(body?: string): unknown
@@ -184,7 +184,7 @@ export interface HostConnectionHandle {
   requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection
 
   /**
-   * Authenticate one frontend index request, owning a token redirect or 401.
+   * Authenticate one frontend index request, owning the sign-in form or 401.
    * @param request - root or configured-index HTTP request.
    * @param response - response owned when the result is false.
    * @returns true only when the frontend may serve index.html.
@@ -192,11 +192,21 @@ export interface HostConnectionHandle {
   authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean
 
   /**
-   * Add the fresh process token to an ordinary Web application URL.
+   * The clean, canonical Web application root URL.
    * @param baseUrl - clean canonical browser origin.
-   * @returns root URL accepted by {@link authorizeIndex} for initial login.
+   * @returns root URL; the operator authenticates by signing in at `/`.
    */
   authenticatedUrl(baseUrl: string): string
+
+  /**
+   * Verify one admin-login submission and mint a session cookie on success.
+   * @param request - the `/login` POST request, for its Host header.
+   * @param email - submitted email.
+   * @param password - submitted password.
+   * @returns the Set-Cookie value on success, or undefined when the
+   * authority cannot be determined or the credential is wrong.
+   */
+  attemptLogin(request: ConnectionTrustRequest, email: string, password: string): string | undefined
 }
 
 /** Transport-independent Fetch handler used by HTTP and worker carriers. */

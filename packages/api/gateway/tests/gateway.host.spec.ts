@@ -18,7 +18,7 @@ import {
 } from '@deepseek-ai/dsh-typert-protocol'
 import TypertRegistry, { type TypertContribution } from '@deepseek-ai/dsh-typert-registry'
 import TypertGatewayService, { TypertGatewayError } from '@deepseek-ai/dsh-api-gateway'
-import { provideBrowserCredentials } from './browser-credentials.ts'
+import { provideBrowserCredentials, TEST_ADMIN_EMAIL, TEST_ADMIN_PASSWORD } from './browser-credentials.ts'
 
 interface FixtureAgent {
   readonly id: string
@@ -174,18 +174,10 @@ async function serveRoute(route: WebRoute): Promise<{ readonly origin: string; c
   }
 }
 
-/** Exchange a Connection launch token without mounting the frontend fallback. */
+/** Sign in with the default test admin credential and return the resulting Cookie header. */
 function browserCookie(connection: HostConnectionHandle, origin: string): string {
-  const target = new URL(connection.authenticatedUrl(origin))
-  let setCookie: string | undefined
-  connection.authorizeIndex({
-    method: 'GET',
-    url: `${target.pathname}${target.search}`,
-    headers: { host: target.host },
-  }, {
-    writeHead(_status, headers) { setCookie = headers?.['set-cookie'] },
-    end() {},
-  })
+  const host = new URL(origin).host
+  const setCookie = connection.attemptLogin({ headers: { host } }, TEST_ADMIN_EMAIL, TEST_ADMIN_PASSWORD)
   if (setCookie === undefined) throw new Error('gateway fixture did not receive an authentication cookie')
   return setCookie.split(';', 1)[0]!
 }
@@ -1187,8 +1179,9 @@ describe('TypertGatewayService', () => {
     const removeLookup = registerAgentLookup(ctx, { id: 'agent-1' })
     const removeStrict = registerStrict(ctx, [createDescriptor()])
     let strictActive = true
-    expect(routes).toHaveLength(1)
-    const server = await serveRoute(routes[0]!)
+    const apiRoute = routes.find(route => route.path === '/api')
+    if (apiRoute === undefined) throw new Error('Connection did not register the /api route')
+    const server = await serveRoute(apiRoute)
     const cookie = browserCookie(ctx.connection, server.origin)
 
     try {

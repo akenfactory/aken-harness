@@ -26,6 +26,8 @@ interface WebRoute {
 
 Match order is fixed: exact table first, then longest matching prefix, then the registered fallback. Registration order carries no request-facing semantics — named routes are composed to be disjoint, and the fallback seat answers anything no named route claims; one owner only, a second registration throws. The shipped Web composition claims the seat with [`dsh-host-frontend-static`](../../packages/host/frontend-static/src/index.ts), the SPA dist server with locked semantics: Connection authenticates the dist root and configured index before their HTML is read; non-index assets remain public; non-GET/HEAD is 405, traversal outside the dist root is 403, existing files are served directly, absent or non-file targets are empty 404 responses, and unknown extensions ship as octet-stream.
 
+An exact named route can own a plain HTML form-and-POST flow ahead of the fallback seat: [`dsh-client-connection`](../../packages/client/connection/README.md#browser-authentication-and-request-trust) registers `POST /login` this way when the optional admin-login gate is configured, so the sign-in submission is handled before the SPA dist server (or any authenticated route) ever sees a request.
+
 ## Config
 
 ```ts type-equiv

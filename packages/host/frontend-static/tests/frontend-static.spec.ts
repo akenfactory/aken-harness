@@ -17,7 +17,12 @@ import Include from '@deepseek-ai/cordis-plugin-include'
 import * as Connection from '@deepseek-ai/dsh-client-connection'
 import LocalCredentials from '@deepseek-ai/dsh-credentials-local'
 import HttpServer from '@deepseek-ai/dsh-host-webserver'
+import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import * as FrontendStatic from '../src/index.ts'
+
+/** `dsh web` requires an admin login; this direct Loader harness supplies a fixed test credential. */
+const ADMIN_EMAIL = 'admin@example.com'
+const ADMIN_PASSWORD = 'correct horse battery'
 
 let root: string | undefined
 let context: Context | undefined
@@ -60,6 +65,10 @@ async function loadComposition(): Promise<Context> {
 
   context = new Context()
   context.baseUrl = pathToFileURL(root).href + '/'
+  context.provide('launchEnvironment', createLaunchEnvironmentSnapshot([{
+    source: 'process',
+    values: { ADMIN_EMAIL, ADMIN_PASSWORD },
+  }]))
   await context.plugin(Loader)
   context.loader.builtins.include = Include
   const modules = new Map<string, unknown>([
@@ -102,12 +111,17 @@ describe('real Loader composition', () => {
     expect(unloaded).toEqual([])
     const server = loaded.webServer
     const port = server.port
-    const launchUrl = loaded.connection.authenticatedUrl(`http://127.0.0.1:${String(port)}`)
-    const exchange = await fetch(launchUrl, { redirect: 'manual' })
+    const loginBody = `email=${encodeURIComponent(ADMIN_EMAIL)}&password=${encodeURIComponent(ADMIN_PASSWORD)}`
+    const exchange = await fetch(`http://127.0.0.1:${String(port)}/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: loginBody,
+      redirect: 'manual',
+    })
     expect(exchange.status).toBe(303)
     expect(exchange.headers.get('location')).toBe('/')
     const setCookie = exchange.headers.get('set-cookie')
-    if (setCookie === null) throw new Error('authenticated frontend did not set a cookie')
+    if (setCookie === null) throw new Error('admin login did not set a cookie')
     const cookie = setCookie.split(';', 1)[0]!
     const authenticated = (init?: RequestInit): RequestInit => {
       const headers = new Headers(init?.headers)
@@ -115,10 +129,17 @@ describe('real Loader composition', () => {
       return { ...init, headers }
     }
 
-    expect(await request(port, '/')).toMatchObject({
+    const loginPage = await request(port, '/')
+    expect(loginPage.status).toBe(200)
+    expect(loginPage.type).toBe('text/html; charset=utf-8')
+    expect(loginPage.body).toContain('action="/login"')
+    // The configured index alias (as opposed to the bare root) is not the
+    // sign-in entry point: unauthenticated, it gets the plain 401 like any
+    // other unauthenticated index request.
+    expect(await request(port, '/index.html')).toMatchObject({
       status: 401,
       type: 'text/plain; charset=utf-8',
-      body: 'dsh web authentication required; reopen the URL printed by dsh web.\n',
+      body: 'dsh web authentication required; sign in at /.\n',
     })
 
     // Real assets with their MIME types; a live rebuild is served on the next read.

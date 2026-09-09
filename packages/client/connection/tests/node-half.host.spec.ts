@@ -10,7 +10,7 @@ import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type { IndexInjection, WebServer, WebRoute, WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver'
 import { API_PATH, RpcId, apply, inject, type ClientRequest, type ConnectionConfig, type HostConnectionHandle } from '../src/index.ts'
 import { DEFAULT_MAX_REQUEST_BODY_BYTES } from '../src/http-bridge.ts'
-import { provideBrowserCredentials } from './browser-credentials.ts'
+import { provideBrowserCredentials, TEST_ADMIN_EMAIL, TEST_ADMIN_PASSWORD } from './browser-credentials.ts'
 
 /** Structural webServer fake recording both route registries. */
 function fakeHttpServer(
@@ -104,16 +104,10 @@ async function mounted(config?: ConnectionConfig): Promise<{
   }
 }
 
-/** Exchange a service's process token for one authority-bound Cookie header. */
+/** Sign in with the default test admin credential and return the resulting Cookie header. */
 function browserCookie(connection: HostConnectionHandle, authority: string): string {
-  const url = new URL(connection.authenticatedUrl(`http://${authority}`))
-  const exchanged = fakeResponse()
-  connection.authorizeIndex(
-    fakeRequest({ host: authority }, `${url.pathname}${url.search}`),
-    exchanged.response,
-  )
-  const setCookie = exchanged.state.headers?.['set-cookie']
-  if (setCookie === undefined) throw new Error('browser token exchange did not set a cookie')
+  const setCookie = connection.attemptLogin({ headers: { host: authority } }, TEST_ADMIN_EMAIL, TEST_ADMIN_PASSWORD)
+  if (setCookie === undefined) throw new Error('admin login did not set a cookie')
   return setCookie.split(';', 1)[0]!
 }
 
@@ -185,10 +179,9 @@ describe('connection node half', () => {
     expect(upgrades).toHaveLength(0)
   })
 
-  it('registers only the HTTP route and removes it with the fiber', async () => {
+  it('registers the /api and /login routes and removes both with the fiber', async () => {
     const { routes, upgrades, dispose } = await mounted()
-    expect(routes).toHaveLength(1)
-    expect(routes[0]).toMatchObject({ kind: 'prefix', path: API_PATH })
+    expect(routes.map(route => `${route.kind}:${route.path}`).sort()).toEqual(['exact:/login', `prefix:${API_PATH}`])
     expect(upgrades).toHaveLength(0)
     await dispose()
     expect(routes).toHaveLength(0)
@@ -285,8 +278,7 @@ describe('connection node half', () => {
     ctx.provide('webServer', fakeHttpServer(routes, []) as WebServer)
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
-    expect(routes).toHaveLength(1)
-    expect(routes[0]).toMatchObject({ kind: 'prefix', path: API_PATH })
+    expect(routes.map(route => `${route.kind}:${route.path}`).sort()).toEqual(['exact:/login', `prefix:${API_PATH}`])
 
     const connection = ctx.get('connection') as HostConnectionHandle
     const calls: unknown[] = []
@@ -322,7 +314,7 @@ describe('connection node half', () => {
     expect(() => connection.rpc.handle('/rpc', async () => ({ ok: true, value: null })))
       .toThrow(/duplicate route/)
     await remove()
-    expect(routes.map(candidate => candidate.path)).toEqual([API_PATH])
+    expect(routes.map(candidate => candidate.path).sort()).toEqual([API_PATH, '/login'])
     await fiber.dispose()
     expect(routes).toHaveLength(0)
   })
@@ -483,6 +475,75 @@ describe('connection node half', () => {
     expect(() => connection.rpc.handle('api3', async () => ({ ok: true, value: null })))
       .toThrow('invalid or reserved RPC channel')
     await remove()
+    await fiber.dispose()
+  })
+
+  it.each([
+    { label: 'neither set', env: {} },
+    { label: 'only ADMIN_EMAIL set', env: { ADMIN_EMAIL: 'admin@example.com' } },
+    { label: 'only ADMIN_PASSWORD set', env: { ADMIN_PASSWORD: 'correct horse battery' } },
+  ])('fails loud when $label: dsh web has no other way to sign in', async ({ env }) => {
+    const ctx = new Context()
+    const routes: WebRoute[] = []
+    provideBrowserCredentials(ctx, env)
+    ctx.provide('webServer', fakeHttpServer(routes, []) as WebServer)
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await expect(fiber).rejects.toThrow(/ADMIN_EMAIL and ADMIN_PASSWORD must both be set/u)
+    expect(routes).toHaveLength(0)
+    expect(ctx.get('connection')).toBeUndefined()
+  })
+
+  it('registers /login and gates / behind the sign-in form', async () => {
+    const ctx = new Context()
+    const routes: WebRoute[] = []
+    provideBrowserCredentials(ctx)
+    ctx.provide('webServer', fakeHttpServer(routes, []) as WebServer)
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    expect(routes.map(route => `${route.kind}:${route.path}`).sort()).toEqual(['exact:/login', `prefix:${API_PATH}`])
+
+    const connection = ctx.get('connection') as HostConnectionHandle
+    expect(connection.authenticatedUrl('http://127.0.0.1:3080')).toBe('http://127.0.0.1:3080/')
+    const page = fakeResponse()
+    expect(connection.authorizeIndex(fakeRequest({ host: '127.0.0.1:3080' }, '/'), page.response)).toBe(false)
+    expect(page.state.status).toBe(200)
+    expect(String(page.state.body)).toContain('action="/login"')
+
+    await fiber.dispose()
+  })
+
+  it('accepts a real /login submission and mints an authenticated cookie', async () => {
+    const ctx = new Context()
+    const routes: WebRoute[] = []
+    provideBrowserCredentials(ctx)
+    ctx.provide('webServer', fakeHttpServer(routes, []) as WebServer)
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    const loginRoute = routes.find(route => route.path === '/login')!
+
+    const wrong = fakeRawPost(
+      { host: '127.0.0.1:3080' }, '/login', `email=${TEST_ADMIN_EMAIL}&password=wrong`,
+    )
+    Object.assign(wrong, { socket: { remoteAddress: '203.0.113.9' } })
+    const rejected = fakeResponse()
+    await loginRoute.handler(wrong, rejected.response)
+    expect(rejected.state.status).toBe(401)
+
+    const right = fakeRawPost(
+      { host: '127.0.0.1:3080' }, '/login', `email=${TEST_ADMIN_EMAIL}&password=${TEST_ADMIN_PASSWORD}`,
+    )
+    Object.assign(right, { socket: { remoteAddress: '203.0.113.10' } })
+    const accepted = fakeResponse()
+    await loginRoute.handler(right, accepted.response)
+    expect(accepted.state.status).toBe(303)
+    const cookie = accepted.state.headers?.['set-cookie']?.split(';', 1)[0]
+    if (cookie === undefined) throw new Error('admin login did not set a cookie')
+
+    const apiRoute = routes.find(route => route.path === API_PATH)!
+    const authenticated = fakeResponse()
+    await apiRoute.handler(fakeRequest({ host: '127.0.0.1:3080', cookie }), authenticated.response)
+    expect(authenticated.state.status).toBe(404)
+
     await fiber.dispose()
   })
 })

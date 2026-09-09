@@ -81,6 +81,16 @@ describe.skipIf(!requiredArtifacts)('Goal Remote built LIB chain', () => {
           return next ?? current
         },
       })
+      const ADMIN_EMAIL = 'admin@example.com'
+      const ADMIN_PASSWORD = 'correct horse battery'
+      host.provide('launchEnvironment', {
+        get(name) { return this.getFrom(name, ['process']) },
+        getFrom(name) {
+          if (name === 'ADMIN_EMAIL') return { value: ADMIN_EMAIL, source: 'process' }
+          if (name === 'ADMIN_PASSWORD') return { value: ADMIN_PASSWORD, source: 'process' }
+          return undefined
+        },
+      })
       await host.plugin({ inject: connectionHost.inject, apply: connectionHost.apply })
       await host.plugin(TypertRegistry)
       await host.plugin(AgentRegistry)
@@ -113,26 +123,39 @@ describe.skipIf(!requiredArtifacts)('Goal Remote built LIB chain', () => {
       host.agents.register(rootAgent)
       host.agents.register(scopedAgent)
 
-      if (routes.length !== 1 || routes[0].path !== '/api') {
-        throw new Error('Connection did not register exactly one /api route')
+      const apiRoute = routes.find(route => route.path === '/api')
+      const loginRoute = routes.find(route => route.path === '/login')
+      if (routes.length !== 2 || apiRoute === undefined || loginRoute === undefined) {
+        throw new Error('Connection did not register exactly the /api and /login routes')
       }
       const server = createServer((request, response) => {
-        if ((request.url ?? '/').startsWith('/?')) {
-          if (host.connection.authorizeIndex(request, response)) {
-            response.writeHead(200, { 'content-type': 'text/html' })
-            response.end('<body>shell</body>')
-          }
+        const url = request.url ?? '/'
+        if (url === '/login') {
+          void loginRoute.handler(request, response)
           return
         }
-        void routes[0].handler(request, response)
+        if (url.startsWith('/api')) {
+          void apiRoute.handler(request, response)
+          return
+        }
+        if (host.connection.authorizeIndex(request, response)) {
+          response.writeHead(200, { 'content-type': 'text/html' })
+          response.end('<body>shell</body>')
+        }
       })
       await new Promise(resolveListen => server.listen(0, '127.0.0.1', resolveListen))
       const address = server.address()
       if (address === null || typeof address === 'string') throw new Error('HTTP server has no TCP address')
       const origin = 'http://127.0.0.1:' + String(address.port)
-      const login = await fetch(host.connection.authenticatedUrl(origin), { redirect: 'manual' })
+      const loginBody = 'email=' + encodeURIComponent(ADMIN_EMAIL) + '&password=' + encodeURIComponent(ADMIN_PASSWORD)
+      const login = await fetch(origin + '/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: loginBody,
+        redirect: 'manual',
+      })
       const setCookie = login.headers.get('set-cookie')
-      if (login.status !== 303 || setCookie === null) throw new Error('browser token exchange failed')
+      if (login.status !== 303 || setCookie === null) throw new Error('admin login failed')
       const cookie = setCookie.split(';', 1)[0]
       const hostFetch = globalThis.fetch
       globalThis.fetch = (input, init = {}) => {

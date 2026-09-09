@@ -65,7 +65,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
    * Provide the Host half over the active HTTP server.
    * @param ctx - owning Connection plugin context.
    * @param trustedHosts - deployment authorities accepted by the Host/Origin fence.
-   * @param browserAuth - process token and persistent browser-session owner.
+   * @param browserAuth - admin-login and persistent browser-session owner.
    */
   constructor(
     ctx: Context,
@@ -99,14 +99,19 @@ export class HostConnectionService extends Service implements HostConnectionHand
     return this.browserAuth.isAuthenticated(request) ? undefined : 401
   }
 
-  /** Authenticate an index request through the process-token exchange or cookie. */
+  /** Authenticate an index request through the session cookie, else serve the sign-in form. */
   authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean {
     return this.browserAuth.authorizeIndex(request, response)
   }
 
-  /** Add this process's launch token to the clean application URL. */
+  /** The clean application root URL; the operator authenticates by signing in. */
   authenticatedUrl(baseUrl: string): string {
     return this.browserAuth.authenticatedUrl(baseUrl)
+  }
+
+  /** Verify one admin-login submission and mint a session cookie on success. */
+  attemptLogin(request: ConnectionTrustRequest, email: string, password: string): string | undefined {
+    return this.browserAuth.attemptLogin(request, email, password)
   }
 
   /**

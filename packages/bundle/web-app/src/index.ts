@@ -5,8 +5,9 @@
  * the built frontend dist (workspace knowledge of this bundle, never user
  * config), mounts the `frontend-static` fallback owner over it, registers the
  * harness-source and web-surface prompt sections, the bash-visible web runtime
- * variable, the process-token URL line, and the default-browser handoff. The
- * model and shell retain the clean URL. App command-line values arrive through
+ * variable, the printed URL line, and the default-browser handoff. The
+ * model and shell retain the clean URL; the operator authenticates by signing
+ * in with the configured admin email and password. App command-line values arrive through
  * the `webStartup` service expressions in the bundle patch.
  * @module @deepseek-ai/dsh-web-app
  */

@@ -1,5 +1,10 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import type { CredentialProvider, CredentialRecord } from '@deepseek-ai/dsh-credentials'
+
+/** Default test admin credential, since `dsh web` now requires one to boot. */
+export const TEST_ADMIN_EMAIL = 'admin@example.com'
+export const TEST_ADMIN_PASSWORD = 'correct horse battery'
 
 /** Mutable credential-record double for Connection authentication tests. */
 export class RecordCredentials {
@@ -30,7 +35,15 @@ export class RecordCredentials {
   }
 }
 
-/** Provide the record operations Connection needs during authentication setup. */
-export function provideBrowserCredentials(ctx: Context): void {
+/**
+ * Provide the record operations and required admin-login env vars Connection
+ * needs to boot. `env` overrides the default test admin credential; pass a
+ * partial or empty object to exercise the required-env-var failure path.
+ */
+export function provideBrowserCredentials(
+  ctx: Context,
+  env: Record<string, string> = { ADMIN_EMAIL: TEST_ADMIN_EMAIL, ADMIN_PASSWORD: TEST_ADMIN_PASSWORD },
+): void {
   ctx.provide('credentials', new RecordCredentials() as unknown as CredentialProvider)
+  ctx.provide('launchEnvironment', createLaunchEnvironmentSnapshot([{ source: 'process', values: env }]))
 }

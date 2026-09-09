@@ -22,7 +22,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'fixture/broken': { readonly count: bigint }
   }
 }
-import { provideBrowserCredentials } from './browser-credentials.ts'
+import { provideBrowserCredentials, TEST_ADMIN_EMAIL, TEST_ADMIN_PASSWORD } from './browser-credentials.ts'
 import TypertGatewayService, {
   TypertGatewayError,
   type Config as GatewayConfig,
@@ -47,21 +47,12 @@ const REMOTE_HOST = { home: '/home/fixture' } as const
 type AgentWireId = TypertContextWire<TypertContextMap['agent']>
 const agentId = (value: string): AgentWireId => value as AgentWireId
 
-/** Exchange this test Host's process token for its WebSocket/HTTP Cookie header. */
+/** Sign in with the default test admin credential for this test Host's WebSocket/HTTP Cookie header. */
 function browserCookie(ctx: Context): string {
   const existing = browserCookies.get(ctx)
   if (existing !== undefined) return existing
-  const origin = `http://127.0.0.1:${String(ctx.webServer.port)}`
-  const target = new URL(ctx.connection.authenticatedUrl(origin))
-  let setCookie: string | undefined
-  ctx.connection.authorizeIndex({
-    method: 'GET',
-    url: `${target.pathname}${target.search}`,
-    headers: { host: target.host },
-  }, {
-    writeHead(_status, headers) { setCookie = headers?.['set-cookie'] },
-    end() {},
-  })
+  const host = `127.0.0.1:${String(ctx.webServer.port)}`
+  const setCookie = ctx.connection.attemptLogin({ headers: { host } }, TEST_ADMIN_EMAIL, TEST_ADMIN_PASSWORD)
   if (setCookie === undefined) throw new Error('gateway stream fixture did not receive a browser cookie')
   const cookie = setCookie.split(';', 1)[0]!
   browserCookies.set(ctx, cookie)

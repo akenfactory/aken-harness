@@ -31,6 +31,7 @@ import { pathToFileURL } from 'node:url'
 import type { Page } from 'playwright'
 import { expect } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include, { type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import Group from '@deepseek-ai/cordis-plugin-group'
@@ -183,6 +184,9 @@ const BASE_PATCH_PATH = join(REPO_ROOT, 'packages/bundle/base/cordis.patch.yml')
 const WEB_PATCH_PATH = join(REPO_ROOT, 'packages/bundle/web-app/cordis.patch.yml')
 /** The installation anchor whose dependency surface the profile module fallback mirrors. */
 const INSTALL_ANCHOR = join(REPO_ROOT, 'apps/cli/package.json')
+/** `dsh web` requires an admin login; this scaffold supplies a fixed test-only credential. */
+const SCAFFOLD_ADMIN_EMAIL = 'web-e2e-scaffold@example.com'
+const SCAFFOLD_ADMIN_PASSWORD = 'web-e2e-scaffold-password'
 
 // Replay publishes the provider catalog the gateway routes to (providers
 // mode, never catch-all: with llm-deepseek disabled no adapter exists, so a
@@ -260,7 +264,11 @@ export interface WebScaffold {
   mode: WebSnapshotMode
   /** Browser-facing origin for the bound test server. */
   baseUrl: string
-  /** Process-token URL that establishes this scaffold's browser session. */
+  /**
+   * Test-only bootstrap URL that establishes this scaffold's browser session
+   * (`/e2e-session`, registered by this scaffold — not part of `dsh web`
+   * itself, which only accepts the admin email+password login).
+   */
   authenticatedUrl: string
   /** Settled root context (the in-process readiness barrier; headless event subscription is its sanctioned use). */
   ctx: Context
@@ -684,6 +692,13 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     ctx.baseUrl = pathToFileURL(profileDir).href + '/'
     // This direct Loader harness supplies the same root-path capability as app-boot.
     ctx.provide('dshHomePath', dshHomePath)
+    // `dsh web` requires an admin login; this direct Loader harness never goes
+    // through profile-boot.ts, so it must supply the launch environment itself
+    // rather than rely on the real process environment.
+    ctx.provide('launchEnvironment', createLaunchEnvironmentSnapshot([{
+      source: 'process',
+      values: { ADMIN_EMAIL: SCAFFOLD_ADMIN_EMAIL, ADMIN_PASSWORD: SCAFFOLD_ADMIN_PASSWORD },
+    }]))
     // A host with no command line still provides one: the web bundle's startup
     // row releases the rows waiting on it, and with no arguments each starts on
     // the values this scaffold composed above. An exit request can only come
@@ -776,16 +791,38 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
       ), 'web e2e scaffold: route-only adapter')
     }
     baseUrl = `http://${browserHost}:${String(port)}`
-    authenticatedUrl = ctx.connection.authenticatedUrl(baseUrl)
-    const login = await fetch(authenticatedUrl, { redirect: 'manual' })
+    const loginBody = `email=${encodeURIComponent(SCAFFOLD_ADMIN_EMAIL)}&password=${encodeURIComponent(SCAFFOLD_ADMIN_PASSWORD)}`
+    const login = await fetch(`${baseUrl}/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: loginBody,
+      redirect: 'manual',
+    })
     const setCookie = login.headers.get('set-cookie')
     if (login.status !== 303 || login.headers.get('location') !== '/' || setCookie === null) {
-      throw new Error('web e2e scaffold: browser token exchange did not return its session cookie')
+      throw new Error('web e2e scaffold: admin login did not return its session cookie')
     }
     cookieHeader = setCookie.split(';', 1)[0] ?? ''
     if (cookieHeader.length === 0) {
-      throw new Error('web e2e scaffold: browser token exchange returned an empty session cookie')
+      throw new Error('web e2e scaffold: admin login returned an empty session cookie')
     }
+    // A GET-navigable bootstrap for Playwright: `dsh web` itself only accepts
+    // credentials through the `/login` POST (there is no other way in — see
+    // .agents/notes/implemented/feature/2026-09-07-admin-login-credential-gate.md).
+    // This route is not part of that product surface; it exists only in this
+    // scaffold's own composition, seeds the exact cookie the real login above
+    // already obtained, and lets `page.goto(scaffold.authenticatedUrl)` land
+    // an authenticated browser tab without teaching the shipped server a
+    // second credential path.
+    ctx.webServer.register({
+      kind: 'exact',
+      path: '/e2e-session',
+      handler: (_req, res) => {
+        res.writeHead(303, { 'cache-control': 'no-store', 'location': '/', 'set-cookie': setCookie })
+        res.end()
+      },
+    })
+    authenticatedUrl = `${baseUrl}/e2e-session`
   } catch (error) {
     if (process.cwd() !== originalCwd) process.chdir(originalCwd)
     const cleanupFailures = await cleanupScaffoldWorld(ctx, workspaceCwd, persistenceRoot)
